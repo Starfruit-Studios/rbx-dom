@@ -98,7 +98,7 @@ pub struct Vector3 {
     pub z: f32,
 }
 
-fn approx_unit_or_zero(value: f32) -> Option<i32> {
+fn unit_or_zero(value: f32) -> Option<i32> {
     // Exact equality check against 0.0 / ±1.0.
     //
     // The previous one-sided tolerance `value.abs() - 1.0 <= f32::EPSILON`
@@ -158,9 +158,9 @@ impl Vector3 {
             }
         }
 
-        let x = approx_unit_or_zero(self.x);
-        let y = approx_unit_or_zero(self.y);
-        let z = approx_unit_or_zero(self.z);
+        let x = unit_or_zero(self.x);
+        let y = unit_or_zero(self.y);
+        let z = unit_or_zero(self.z);
 
         match (x, y, z) {
             (Some(x), Some(0), Some(0)) => get_normal_id(0, x),
