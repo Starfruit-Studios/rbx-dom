@@ -54,6 +54,29 @@ impl Type {
             VariantType::ContentId => Type::String,
             VariantType::Tags => Type::String,
             VariantType::MaterialColors => Type::String,
+            // Workaround for upstream rojo-rbx/rbx-dom#597.
+            //
+            // When the reflection database classifies a property with
+            // `Value(Attributes)` data type — most visibly
+            // `StyleRule.PropertiesSerialize` after the Jan 2026
+            // reclassification — the upstream dispatch returned `None`
+            // here and the serializer bailed with `UnsupportedPropType`,
+            // crashing `.rbxl` writes for any place containing a
+            // `StyleRule` instance (common in modern Studio UI via
+            // `ScriptedStyling` and the BaseSet).
+            //
+            // The serializer already knows how to encode
+            // `Variant::Attributes` via the `Type::String` path (it
+            // calls `Attributes::to_writer` to produce the binary
+            // blob, then `chunk.write_binary_string`). The missing
+            // piece was routing `VariantType::Attributes` onto that
+            // path — binary stores `AttributesSerialize` as a
+            // length-prefixed byte buffer, identical in wire shape
+            // to String/BinaryString/Tags/MaterialColors above.
+            //
+            // Deserialization already handled via the symmetric
+            // arm in `deserializer/state.rs`.
+            VariantType::Attributes => Type::String,
 
             VariantType::SharedString => Type::SharedString,
             VariantType::NetAssetRef => Type::SharedString,
