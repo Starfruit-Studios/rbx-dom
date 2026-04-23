@@ -2,12 +2,53 @@
 	<img width="400" src="rbx-dom-logo.png" />
 </div>
 
-<h1 align="center">rbx-dom</h1>
-<div align="center">
-	<a href="https://github.com/rojo-rbx/rbx-dom/actions">
-		<img title="GitHub Actions" src="https://github.com/rojo-rbx/rbx-dom/workflows/CI/badge.svg" />
-	</a>
-</div>
+<h1 align="center">Starfruit Studios custom rbx-dom for our Roblox plugins.</h1>
+
+---
+
+## Why this fork exists
+
+Starfruit Studios builds Roblox plugins that require **byte-identical** serialization of Roblox place and model files. The upstream rbx-dom crates are excellent, and this fork stays as close to them as possible, but three specific bugs in upstream broke our round-trip fidelity guarantees. Rather than block on upstream PR timelines, we carry the fixes here.
+
+All three patches are real bug fixes against upstream behavior. We intend to submit them upstream as PRs and retire this fork once they land; in the meantime, anyone is welcome to consume this build.
+
+### Carried patches (branch `starfruit-patches`)
+
+| # | File | Fix | Upstream |
+|---|---|---|---|
+| 1 | `rbx_types/src/basic_types.rs` | `approx_unit_or_zero` uses exact equality — prevents near-identity rotation matrices from being snapped during `.rbxl` serialization. | [rojo-rbx/rbx-dom#601](https://github.com/rojo-rbx/rbx-dom/pull/601) |
+| 2 | `rbx_binary/src/types.rs` | `VariantType::Attributes` routes onto `Type::String` — unblocks `.rbxl` writes for places containing modern `StyleRule` instances. | [rojo-rbx/rbx-dom#597](https://github.com/rojo-rbx/rbx-dom/issues/597) |
+| 3 | `rbx_binary/src/serializer/state.rs` | `Ray` serializer writes `direction.z` instead of `direction.x` on the 6th wire slot — the original was a typo that clobbered `direction.z` on every round trip. | Pure data-corruption bug fix. |
+
+Full patch details + impact measurements live on the `starfruit-patches` branch commit messages.
+
+### Consuming the fork
+
+From `Cargo.toml` via a `[patch.crates-io]` block:
+
+```toml
+[patch.crates-io]
+rbx_binary = { git = "https://github.com/Starfruit-Studios/rbx-dom", branch = "starfruit-patches" }
+rbx_dom_weak = { git = "https://github.com/Starfruit-Studios/rbx-dom", branch = "starfruit-patches" }
+rbx_reflection = { git = "https://github.com/Starfruit-Studios/rbx-dom", branch = "starfruit-patches" }
+rbx_reflection_database = { git = "https://github.com/Starfruit-Studios/rbx-dom", branch = "starfruit-patches" }
+rbx_types = { git = "https://github.com/Starfruit-Studios/rbx-dom", branch = "starfruit-patches" }
+rbx_xml = { git = "https://github.com/Starfruit-Studios/rbx-dom", branch = "starfruit-patches" }
+```
+
+### Staying current with upstream
+
+`master` tracks upstream verbatim. `starfruit-patches` is a thin branch on top of `master` carrying only the three fixes above. We rebase monthly against upstream.
+
+### License
+
+Unchanged from upstream — [MIT](LICENSE.txt). Credit for the underlying implementation belongs to the original authors; this fork adds only the three patches listed above.
+
+---
+
+> The rest of this README is preserved verbatim from upstream so consumers of individual crates see the same documentation they'd see on the public repo.
+
+---
 
 rbx-dom is a collection of cross-platform libraries that enables any software to interact with Roblox instances.
 
@@ -121,6 +162,8 @@ This project has unveiled a handful of interesting bugs and quirks in Roblox!
 - `ColorSequence`'s XML serialization contains an extra value per keypoint that was intended to be used as an envelope value, but was never implemented.
 
 ## For Maintainers
+
+> **Note for this fork:** we do NOT publish to crates.io from the fork — consumers pull via `[patch.crates-io]` git dependency. The section below is the upstream maintainer guide, preserved for reference.
 
 Cutting new releases is not currently as optimized as it should be. While we work on improving it, packages need to be published in a specific order to make sense. The order that currently works well is:
 
