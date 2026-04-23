@@ -1060,7 +1060,16 @@ impl<'dom, 'db: 'dom, W: Write> SerializerState<'dom, 'db, W> {
                                 chunk.write_le_f32(value.origin.z)?;
                                 chunk.write_le_f32(value.direction.x)?;
                                 chunk.write_le_f32(value.direction.y)?;
-                                chunk.write_le_f32(value.direction.x)?;
+                                // The upstream serializer wrote
+                                // `value.direction.x` here instead of
+                                // `value.direction.z`, corrupting every
+                                // Ray property on binary serialize — the
+                                // 6th wire slot held direction.x twice,
+                                // which the reader (correctly expecting
+                                // x, y, z for both origin and direction)
+                                // then interpreted as direction.z.
+                                // One-line fix: write `.z` as intended.
+                                chunk.write_le_f32(value.direction.z)?;
                             } else {
                                 return type_mismatch(i, rbx_value, "Ray");
                             }
