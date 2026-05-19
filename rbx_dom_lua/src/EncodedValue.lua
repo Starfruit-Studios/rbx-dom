@@ -102,13 +102,29 @@ types = {
 	},
 
 	Axes = {
+		-- Fork patch (2026-05-19): dual-shape decoder. Legacy rbxjson form
+		-- is `["X", "Y", ...]` (array of axis names); starfruit-sync-server
+		-- wire form is `<u8 bitmask>` where X=0b001, Y=0b010, Z=0b100
+		-- (matches `rbx_types::Axes::bits()`).
 		fromPod = function(pod)
-			local axes = {}
+			if type(pod) == "number" then
+				local axes = {}
+				if bit32.band(pod, 0x1) ~= 0 then
+					table.insert(axes, Enum.Axis.X)
+				end
+				if bit32.band(pod, 0x2) ~= 0 then
+					table.insert(axes, Enum.Axis.Y)
+				end
+				if bit32.band(pod, 0x4) ~= 0 then
+					table.insert(axes, Enum.Axis.Z)
+				end
+				return Axes.new(unpack(axes))
+			end
 
+			local axes = {}
 			for index, axisName in ipairs(pod) do
 				axes[index] = Enum.Axis[axisName]
 			end
-
 			return Axes.new(unpack(axes))
 		end,
 
@@ -324,13 +340,39 @@ types = {
 	},
 
 	Faces = {
+		-- Fork patch (2026-05-19): dual-shape decoder. Legacy rbxjson form
+		-- is `["Right", "Top", ...]` (array of NormalId names);
+		-- starfruit-sync-server wire form is `<u8 bitmask>` where Right=0x01,
+		-- Top=0x02, Back=0x04, Left=0x08, Bottom=0x10, Front=0x20 (matches
+		-- `rbx_types::Faces::bits()`).
 		fromPod = function(pod)
-			local faces = {}
+			if type(pod) == "number" then
+				local faces = {}
+				if bit32.band(pod, 0x01) ~= 0 then
+					table.insert(faces, Enum.NormalId.Right)
+				end
+				if bit32.band(pod, 0x02) ~= 0 then
+					table.insert(faces, Enum.NormalId.Top)
+				end
+				if bit32.band(pod, 0x04) ~= 0 then
+					table.insert(faces, Enum.NormalId.Back)
+				end
+				if bit32.band(pod, 0x08) ~= 0 then
+					table.insert(faces, Enum.NormalId.Left)
+				end
+				if bit32.band(pod, 0x10) ~= 0 then
+					table.insert(faces, Enum.NormalId.Bottom)
+				end
+				if bit32.band(pod, 0x20) ~= 0 then
+					table.insert(faces, Enum.NormalId.Front)
+				end
+				return Faces.new(unpack(faces))
+			end
 
+			local faces = {}
 			for index, faceName in ipairs(pod) do
 				faces[index] = Enum.NormalId[faceName]
 			end
-
 			return Faces.new(unpack(faces))
 		end,
 
