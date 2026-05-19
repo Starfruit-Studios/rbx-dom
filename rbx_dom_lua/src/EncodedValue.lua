@@ -152,17 +152,36 @@ types = {
 	},
 
 	CFrame = {
+		-- Fork patch (2026-05-19): dual-shape decoder. Legacy rbxjson form
+		-- is `{position: [x, y, z], orientation: [[r00..r02], [r10..r12],
+		-- [r20..r22]]}` (3x3 array of arrays); starfruit-sync-server wire
+		-- form is `{position: [x, y, z], rotation: [r00, r01, r02, r10,
+		-- r11, r12, r20, r21, r22]}` (flat 9-element rotation array). Both
+		-- shapes may have $f32-wrapped components, which we unwrap
+		-- recursively first.
 		fromPod = function(pod)
+			pod = unwrapF32Wrappers(pod)
 			local pos = pod.position
-			local orient = pod.orientation
 
-			--stylua: ignore
-			return CFrame.new(
-				pos[1], pos[2], pos[3],
-				orient[1][1], orient[1][2], orient[1][3],
-				orient[2][1], orient[2][2], orient[2][3],
-				orient[3][1], orient[3][2], orient[3][3]
-			)
+			if pod.rotation ~= nil then
+				local r = pod.rotation
+				--stylua: ignore
+				return CFrame.new(
+					pos[1], pos[2], pos[3],
+					r[1], r[2], r[3],
+					r[4], r[5], r[6],
+					r[7], r[8], r[9]
+				)
+			else
+				local orient = pod.orientation
+				--stylua: ignore
+				return CFrame.new(
+					pos[1], pos[2], pos[3],
+					orient[1][1], orient[1][2], orient[1][3],
+					orient[2][1], orient[2][2], orient[2][3],
+					orient[3][1], orient[3][2], orient[3][3]
+				)
+			end
 		end,
 
 		toPod = function(roblox)
@@ -577,7 +596,18 @@ types = {
 	},
 
 	UDim = {
-		fromPod = unpackDecoder(UDim.new),
+		-- Fork patch (2026-05-19): dual-shape decoder. Legacy rbxjson form
+		-- is `[scale, offset]` (array); starfruit-sync-server wire form is
+		-- `{scale: $f32, offset: int}` (object with $f32-wrapped scale +
+		-- bare integer offset).
+		fromPod = function(pod)
+			pod = unwrapF32Wrappers(pod)
+			if pod.scale ~= nil then
+				return UDim.new(pod.scale, pod.offset)
+			else
+				return UDim.new(pod[1], pod[2])
+			end
+		end,
 
 		toPod = function(roblox)
 			return { roblox.Scale, roblox.Offset }
@@ -585,8 +615,19 @@ types = {
 	},
 
 	UDim2 = {
+		-- Fork patch (2026-05-19): dual-shape decoder. Legacy rbxjson form
+		-- is `[[scale, offset], [scale, offset]]` (array of arrays);
+		-- starfruit-sync-server wire form is `{x: {scale, offset}, y:
+		-- {scale, offset}}` (named-key UDims). Each component UDim is
+		-- decoded through `types.UDim.fromPod`, which itself accepts
+		-- both shapes.
 		fromPod = function(pod)
-			return UDim2.new(types.UDim.fromPod(pod[1]), types.UDim.fromPod(pod[2]))
+			pod = unwrapF32Wrappers(pod)
+			if pod.x ~= nil then
+				return UDim2.new(types.UDim.fromPod(pod.x), types.UDim.fromPod(pod.y))
+			else
+				return UDim2.new(types.UDim.fromPod(pod[1]), types.UDim.fromPod(pod[2]))
+			end
 		end,
 
 		toPod = function(roblox)
