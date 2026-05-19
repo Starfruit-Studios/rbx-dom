@@ -20,6 +20,45 @@ local function serializeFloat(value)
 	return value
 end
 
+-- Starfruit-Sync fork patch #46 (2026-05-19): the starfruit-sync-server's
+-- wire format wraps every f32 as `{"$f32": <u32_bits>}` so the plugin can
+-- reconstruct the exact bit pattern via buffer.readf32 (Lua's
+-- HttpService.JSONDecode is not always IEEE-754 correctly-rounded for
+-- 16-digit decimals, and CFrame.new's f64→f32 cast can then resolve to
+-- a 1-ULP-off f32 bit pattern). Upstream rbx-dom-lua's geometric type
+-- decoders (Color3 / Vector3 / CFrame / etc.) all expect plain Lua
+-- numbers in their `pod`s. This helper recursively walks a decoded
+-- table and unwraps any `{"$f32": bits}` it finds back to a Lua number.
+--
+-- Non-mutating (returns a new table when changes are needed; returns
+-- the input value otherwise).
+local function unwrapF32Wrappers(value)
+	if type(value) ~= "table" then
+		return value
+	end
+	if value["$f32"] ~= nil then
+		local b = buffer.create(4)
+		buffer.writeu32(b, 0, value["$f32"])
+		return buffer.readf32(b, 0)
+	end
+	-- Walk children; only allocate a new table if at least one element
+	-- actually needed unwrapping (saves GC pressure on the hot path).
+	local result = nil
+	for k, v in pairs(value) do
+		local unwrapped = unwrapF32Wrappers(v)
+		if unwrapped ~= v then
+			if result == nil then
+				result = {}
+				for k2, v2 in pairs(value) do
+					result[k2] = v2
+				end
+			end
+			result[k] = unwrapped
+		end
+	end
+	return result or value
+end
+
 local ALL_AXES = { "X", "Y", "Z" }
 local ALL_FACES = { "Right", "Top", "Back", "Left", "Bottom", "Front" }
 
@@ -141,7 +180,19 @@ types = {
 	},
 
 	Color3 = {
-		fromPod = unpackDecoder(Color3.new),
+		-- Fork patch #46: dual-shape decoder. Legacy rbxjson form is
+		-- `[r, g, b]` (array); starfruit-sync-server wire form is
+		-- `{r: $f32, g: $f32, b: $f32}` (object with $f32-wrapped
+		-- components). Unwrap any $f32 wrappers, then dispatch by
+		-- detected shape.
+		fromPod = function(pod)
+			pod = unwrapF32Wrappers(pod)
+			if pod.r ~= nil then
+				return Color3.new(pod.r, pod.g, pod.b)
+			else
+				return Color3.new(pod[1], pod[2], pod[3])
+			end
+		end,
 
 		toPod = function(roblox)
 			return { roblox.r, roblox.g, roblox.b }
@@ -275,13 +326,39 @@ types = {
 	},
 
 	Float32 = {
-		fromPod = identity,
+		-- Fork patch #46 (2026-05-19): the starfruit-sync-server emits
+		-- f32 properties as `{"$f32": <u32_bits>}` wrappers for lossless
+		-- bit-exact preservation (Lua HttpService.JSONDecode is not
+		-- always IEEE-754 correctly-rounded for 16-digit decimals).
+		-- unwrapF32Wrappers is a no-op on plain Lua numbers, so disk-form
+		-- rbxjson (bare numbers) flows through unchanged. Wire-form
+		-- ({"$f32": bits}) gets unwrapped via buffer.readf32.
+		fromPod = unwrapF32Wrappers,
 		toPod = serializeFloat,
 	},
 
 	Float64 = {
-		fromPod = identity,
+		-- Same dual-accept as Float32. Float64 doesn't typically need
+		-- bit-exact preservation, but unwrapping is a safe no-op for
+		-- plain numbers, so we apply uniformly.
+		fromPod = unwrapF32Wrappers,
 		toPod = serializeFloat,
+	},
+
+	-- Fork patch #46 (2026-05-19): also expose `$f32` as a `types`
+	-- entry so the legacy single-arg EncodedValue.decode (used by the
+	-- Attributes recursive decoder) also finds it via `next()` dispatch.
+	-- This handles the case where a raw {"$f32": bits} table is passed
+	-- without a dataType hint.
+	["$f32"] = {
+		fromPod = function(bits)
+			local b = buffer.create(4)
+			buffer.writeu32(b, 0, bits)
+			return buffer.readf32(b, 0)
+		end,
+		toPod = function(_)
+			error("$f32 is a wire-only form; encode via Float32 instead")
+		end,
 	},
 
 	Font = {
@@ -378,6 +455,14 @@ types = {
 			if pod == "Default" then
 				return nil
 			else
+				-- Fork patch #46 (2026-05-19): unwrap any $f32 wrappers
+				-- recursively + handle Rust wire form `{custom: {density,
+				-- friction, ...}}` vs legacy rbxjson `{density, friction,
+				-- ...}` direct form. Both shapes encountered in production.
+				pod = unwrapF32Wrappers(pod)
+				if pod.custom then
+					pod = pod.custom
+				end
 				-- Passing `nil` instead of not passing anything gives
 				-- different results, so we have to branch here.
 				if pod.acousticAbsorption then
@@ -518,7 +603,15 @@ types = {
 	},
 
 	Vector2 = {
-		fromPod = unpackDecoder(Vector2.new),
+		-- Fork patch #46: dual-shape decoder.
+		fromPod = function(pod)
+			pod = unwrapF32Wrappers(pod)
+			if pod.x ~= nil then
+				return Vector2.new(pod.x, pod.y)
+			else
+				return Vector2.new(pod[1], pod[2])
+			end
+		end,
 
 		toPod = function(roblox)
 			return {
@@ -537,7 +630,17 @@ types = {
 	},
 
 	Vector3 = {
-		fromPod = unpackDecoder(Vector3.new),
+		-- Fork patch #46: dual-shape decoder. Legacy rbxjson form is
+		-- `[x, y, z]` (array); starfruit-sync-server wire form is
+		-- `{x: $f32, y: $f32, z: $f32}` (object).
+		fromPod = function(pod)
+			pod = unwrapF32Wrappers(pod)
+			if pod.x ~= nil then
+				return Vector3.new(pod.x, pod.y, pod.z)
+			else
+				return Vector3.new(pod[1], pod[2], pod[3])
+			end
+		end,
 
 		toPod = function(roblox)
 			return {
@@ -575,7 +678,92 @@ types.OptionalCFrame = {
 	end,
 }
 
-function EncodedValue.decode(encodedValue)
+-- Fork patch #46 (2026-05-19): types["Enum"] handles starfruit-sync-server
+-- wire form `{enumType: "Name", value: "ItemName"}` (or numeric fallback).
+-- Upstream rbx-dom-lua doesn't have an "Enum" entry — enums are typically
+-- decoded by the consumer (e.g. SyncAdapter's decodeVariant). Adding this
+-- entry means the dataType-aware decode path below can dispatch to it.
+types.Enum = {
+	fromPod = function(pod)
+		if type(pod) == "table" and pod.enumType ~= nil then
+			local enumByType = Enum[pod.enumType]
+			if enumByType ~= nil then
+				local item = enumByType[pod.value]
+				if item ~= nil then return item end
+				-- Numeric value fallback
+				if type(pod.value) == "number" then
+					for _, e in ipairs(enumByType:GetEnumItems()) do
+						if e.Value == pod.value then return e end
+					end
+				end
+			end
+			return nil
+		elseif type(pod) == "number" then
+			-- Numeric-only wire form — caller must know the enum type
+			-- from descriptor.dataType to map this. Return as-is and
+			-- let raw-bracket assignment do the int → Enum coercion.
+			return pod
+		end
+		return pod
+	end,
+	toPod = function(roblox)
+		return { enumType = tostring(roblox.EnumType), value = roblox.Name }
+	end,
+}
+
+function EncodedValue.decode(encodedValue, dataType)
+	-- Fork patch #46 (2026-05-19): dataType-aware dispatch for the
+	-- starfruit-sync-server wire shape (no `{TypeName = pod}` envelope;
+	-- the pod is at the top level). Caller passes `descriptor.dataType`
+	-- from rbx-dom-lua's reflection database — typically
+	-- `{Value = "Float32"}` or `{Enum = "ReverbType"}`.
+	--
+	-- Without this path, `next(encodedValue)` fails for:
+	--   - Booleans (throws "table expected, got boolean")
+	--   - `{"$f32": bits}` wrappers (now handled via types["$f32"] entry)
+	--   - Enum `{enumType, value}` (next() returns first key, not type name)
+	--   - Geometric types with named-key shapes (Vector3 {x, y, z}, etc.)
+	--
+	-- With the hint, we dispatch directly to the typeImpl and call its
+	-- fromPod with the raw pod (the geometric type's fromPod now handles
+	-- both array and object shapes — see Color3/Vector3/Vector2 patches).
+	if dataType ~= nil then
+		local hintedName = nil
+		if type(dataType) == "string" then
+			-- PropertyDescriptor.fromRaw exposes dataType as a STRING:
+			-- "Bool", "Float32", "Color3", "Enum" (for Enums it loses
+			-- the specific enum-type name — types.Enum.fromPod
+			-- recovers it from the pod's `enumType` field on the
+			-- starfruit wire form).
+			hintedName = dataType
+		elseif type(dataType) == "table" then
+			-- Raw rbx-dom-database shape: {Value = "Bool"} or {Enum = "X"}.
+			-- Some callers may pass the raw shape rather than the
+			-- PropertyDescriptor-extracted string.
+			if dataType.Value ~= nil then
+				hintedName = dataType.Value
+			elseif dataType.Enum ~= nil then
+				hintedName = "Enum"
+			end
+		end
+		if hintedName ~= nil then
+			local typeImpl = types[hintedName]
+			if typeImpl ~= nil then
+				local ok, result = pcall(typeImpl.fromPod, encodedValue)
+				if ok then return true, result end
+				return false, tostring(result)
+			end
+			-- Fall through to legacy path if no type impl (extensible)
+		end
+	end
+
+	-- Legacy 1-arg form: rbx-dom-lua's `{TypeName = pod}` envelope shape.
+	-- For booleans / primitives this branch fails (next() throws on
+	-- non-tables) — callers using the wire shape MUST pass dataType.
+	if type(encodedValue) ~= "table" then
+		return false, "Couldn't decode value " .. tostring(encodedValue)
+			.. " (primitive value requires dataType hint)"
+	end
 	local ty, value = next(encodedValue)
 
 	if ty == nil then
