@@ -4,12 +4,6 @@ local function identity(...)
 	return ...
 end
 
-local function unpackDecoder(f)
-	return function(value)
-		return f(unpack(value))
-	end
-end
-
 local function serializeFloat(value)
 	-- TODO: Figure out a better way to serialize infinity and NaN, neither of
 	-- which fit into JSON.
@@ -219,7 +213,16 @@ types = {
 	},
 
 	Color3uint8 = {
-		fromPod = unpackDecoder(Color3.fromRGB),
+		-- Fork patch (2026-05-19): dual-shape decoder. Legacy rbxjson form
+		-- is `[r, g, b]` (array of u8); starfruit-sync-server wire form is
+		-- `{r: int, g: int, b: int}` (named-key bytes 0-255).
+		fromPod = function(pod)
+			if pod.r ~= nil then
+				return Color3.fromRGB(pod.r, pod.g, pod.b)
+			else
+				return Color3.fromRGB(pod[1], pod[2], pod[3])
+			end
+		end,
 
 		toPod = function(roblox)
 			return {
@@ -429,7 +432,17 @@ types = {
 	},
 
 	NumberRange = {
-		fromPod = unpackDecoder(NumberRange.new),
+		-- Fork patch (2026-05-19): dual-shape decoder. Legacy rbxjson form
+		-- is `[min, max]` (array); starfruit-sync-server wire form is
+		-- `{min: $f32, max: $f32}` (named-key with $f32-wrapped components).
+		fromPod = function(pod)
+			pod = unwrapF32Wrappers(pod)
+			if pod.min ~= nil then
+				return NumberRange.new(pod.min, pod.max)
+			else
+				return NumberRange.new(pod[1], pod[2])
+			end
+		end,
 
 		toPod = function(roblox)
 			return { roblox.Min, roblox.Max }
@@ -535,8 +548,16 @@ types = {
 	},
 
 	Rect = {
+		-- Fork patch (2026-05-19): dual-shape decoder. Legacy rbxjson form
+		-- is `[[x, y], [x, y]]` (array of arrays); starfruit-sync-server
+		-- wire form is `{min: {x, y}, max: {x, y}}` (named-key Vector2s,
+		-- each itself dual-shape via types.Vector2.fromPod).
 		fromPod = function(pod)
-			return Rect.new(types.Vector2.fromPod(pod[1]), types.Vector2.fromPod(pod[2]))
+			if pod.min ~= nil then
+				return Rect.new(types.Vector2.fromPod(pod.min), types.Vector2.fromPod(pod.max))
+			else
+				return Rect.new(types.Vector2.fromPod(pod[1]), types.Vector2.fromPod(pod[2]))
+			end
 		end,
 
 		toPod = function(roblox)
@@ -568,8 +589,16 @@ types = {
 	},
 
 	Region3int16 = {
+		-- Fork patch (2026-05-19): dual-shape decoder. Legacy rbxjson form
+		-- is `[[x,y,z], [x,y,z]]` (array of arrays); starfruit-sync-server
+		-- wire form is `{min: {x,y,z}, max: {x,y,z}}` (named-key
+		-- Vector3int16s, each itself dual-shape).
 		fromPod = function(pod)
-			return Region3int16.new(types.Vector3int16.fromPod(pod[1]), types.Vector3int16.fromPod(pod[2]))
+			if pod.min ~= nil then
+				return Region3int16.new(types.Vector3int16.fromPod(pod.min), types.Vector3int16.fromPod(pod.max))
+			else
+				return Region3int16.new(types.Vector3int16.fromPod(pod[1]), types.Vector3int16.fromPod(pod[2]))
+			end
 		end,
 
 		toPod = function(roblox)
@@ -663,7 +692,16 @@ types = {
 	},
 
 	Vector2int16 = {
-		fromPod = unpackDecoder(Vector2int16.new),
+		-- Fork patch (2026-05-19): dual-shape decoder. Legacy rbxjson form
+		-- is `[x, y]` (array); starfruit-sync-server wire form is
+		-- `{x: int, y: int}` (named-key i16 components).
+		fromPod = function(pod)
+			if pod.x ~= nil then
+				return Vector2int16.new(pod.x, pod.y)
+			else
+				return Vector2int16.new(pod[1], pod[2])
+			end
+		end,
 
 		toPod = function(roblox)
 			return { roblox.X, roblox.Y }
@@ -693,7 +731,16 @@ types = {
 	},
 
 	Vector3int16 = {
-		fromPod = unpackDecoder(Vector3int16.new),
+		-- Fork patch (2026-05-19): dual-shape decoder. Legacy rbxjson form
+		-- is `[x, y, z]` (array); starfruit-sync-server wire form is
+		-- `{x: int, y: int, z: int}` (named-key i16 components).
+		fromPod = function(pod)
+			if pod.x ~= nil then
+				return Vector3int16.new(pod.x, pod.y, pod.z)
+			else
+				return Vector3int16.new(pod[1], pod[2], pod[3])
+			end
+		end,
 
 		toPod = function(roblox)
 			return { roblox.X, roblox.Y, roblox.Z }
