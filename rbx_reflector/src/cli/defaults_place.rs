@@ -78,12 +78,65 @@ fn save_place_in_studio(path: &PathBuf) -> anyhow::Result<StudioInfo> {
 
     #[cfg(target_os = "windows")]
     {
-        let result = Innerput::new().send_chord(&[Key::Control, Key::Char('s')], &studio_process);
+        use std::thread;
 
-        if let Err(err) = result {
-            log::error!("{err}");
+        // The generated defaults place can cause Roblox Studio to show
+        // modal dialogs (e.g. Compatibility-Lighting -> Voxel migration,
+        // unsaved-changes prompts, asset-download warnings). These
+        // dialogs steal focus and eat the Innerput Ctrl+S keystroke,
+        // leaving the file watcher waiting forever for a save event
+        // that never arrives. This mirrors the macOS escape-spam pattern
+        // (see the `#[cfg(target_os = "macos")]` block below): for up to
+        // MAX_ATTEMPTS iterations, dismiss any modal with Escape then
+        // try Ctrl+S, and check the file watcher with a short timeout.
+        // Break as soon as a save event fires.
+        const MAX_ATTEMPTS: u32 = 60;
+        let innerput = Innerput::new();
+        let mut saved = false;
 
-            println!("Failed to send key chord to Roblox Studio. Please save the opened place manually (ctrl+s).")
+        for attempt in 0..MAX_ATTEMPTS {
+            // Dismiss any open modal first.
+            let _ = innerput.send_chord(&[Key::Esc], &studio_process);
+            thread::sleep(Duration::from_millis(150));
+
+            // Try Ctrl+S.
+            let save_result =
+                innerput.send_chord(&[Key::Control, Key::Char('s')], &studio_process);
+            if save_result.is_err() && attempt == 0 {
+                log::error!("Innerput send_chord(Ctrl+S) failed: {save_result:?}");
+            }
+
+            // Wait briefly for the file save event. If it fires, we're
+            // done. If it times out, retry the dismiss+save loop.
+            match rx.recv_timeout(Duration::from_millis(700)) {
+                Ok(Ok(event))
+                    if event.kind.is_create() || event.kind.is_modify() =>
+                {
+                    saved = true;
+                    break;
+                }
+                Ok(Ok(_)) => continue,
+                Ok(Err(e)) => return Err(e.into()),
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    bail!("File watcher disconnected unexpectedly")
+                }
+            }
+        }
+
+        if !saved {
+            println!(
+                "Failed to auto-save after {} attempts. Please save manually (Ctrl+S).",
+                MAX_ATTEMPTS
+            );
+            // Fall through to the outer rx.recv() loop so the manual
+            // save still gets picked up.
+            loop {
+                let event = rx.recv()??;
+                if event.kind.is_create() || event.kind.is_modify() {
+                    break;
+                }
+            }
         }
     }
 
@@ -124,15 +177,24 @@ end tell
         Command::new("osascript")
             .args(["-e", script.as_str()])
             .output()?;
+
+        loop {
+            let event = rx.recv()??;
+            if event.kind.is_create() || event.kind.is_modify() {
+                break;
+            }
+        }
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    println!("Please save the opened place in Roblox Studio (ctrl+s).");
+    {
+        println!("Please save the opened place in Roblox Studio (ctrl+s).");
 
-    loop {
-        let event = rx.recv()??;
-        if event.kind.is_create() || event.kind.is_modify() {
-            break;
+        loop {
+            let event = rx.recv()??;
+            if event.kind.is_create() || event.kind.is_modify() {
+                break;
+            }
         }
     }
 
@@ -200,6 +262,19 @@ fn generate_place_with_all_classes(path: &PathBuf, dump: &Dump) -> anyhow::Resul
                 instance.add_child(Instance::new("WrapDeformer"));
             }
 
+            "Lighting" => {
+                // `Lighting.Technology` was sunset (Compatibility →
+                // Retro Tone Mapping migration, DevForum Aug 2024) but
+                // Studio's `-FullAPI` dump still declares the default
+                // value as "Compatibility". When the defaults_place is
+                // opened in modern Studio, the engine auto-migrates the
+                // sunset value and pops a blocking modal dialog that
+                // eats the Innerput Ctrl+S keystroke on Windows. Pre-set
+                // the value to a non-deprecated enum member so Studio
+                // never needs to migrate. Enum.Technology.Voxel = 1.
+                instance.set_property("token", "Technology", "1");
+            }
+
             _ => {}
         }
 
@@ -216,6 +291,23 @@ fn generate_place_with_all_classes(path: &PathBuf, dump: &Dump) -> anyhow::Resul
 struct Instance<'a> {
     class_name: &'a str,
     children: Vec<Instance<'a>>,
+    /// Pre-set property values that should be emitted in a `<Properties>`
+    /// section before the children. Used to override Studio's
+    /// API-dump-declared defaults when those defaults are stale or would
+    /// trigger Studio migration popups on file open (e.g.
+    /// `Lighting.Technology` API-dump-default = "Compatibility" is sunset
+    /// and triggers a migration dialog).
+    properties: Vec<Property<'a>>,
+}
+
+/// A single XML-serialized property override for an `Instance`.
+///
+/// `xml_tag` is the rbxlx wire-format type tag (e.g. `"token"` for an
+/// Enum integer value, `"string"` for a string).
+struct Property<'a> {
+    xml_tag: &'a str,
+    name: &'a str,
+    value: String,
 }
 
 impl<'a> Instance<'a> {
@@ -223,11 +315,20 @@ impl<'a> Instance<'a> {
         Self {
             class_name,
             children: Vec::new(),
+            properties: Vec::new(),
         }
     }
 
     fn add_child(&mut self, child: Instance<'a>) {
         self.children.push(child);
+    }
+
+    fn set_property(&mut self, xml_tag: &'a str, name: &'a str, value: impl Into<String>) {
+        self.properties.push(Property {
+            xml_tag,
+            name,
+            value: value.into(),
+        });
     }
 }
 
@@ -238,6 +339,20 @@ impl fmt::Display for Instance<'_> {
             "<Item class=\"{}\" referent=\"{}\">",
             self.class_name, self.class_name
         )?;
+
+        if !self.properties.is_empty() {
+            writeln!(f, "<Properties>")?;
+            for prop in &self.properties {
+                writeln!(
+                    f,
+                    "<{tag} name=\"{name}\">{value}</{tag}>",
+                    tag = prop.xml_tag,
+                    name = prop.name,
+                    value = prop.value
+                )?;
+            }
+            writeln!(f, "</Properties>")?;
+        }
 
         for child in &self.children {
             write!(f, "{child}")?;
