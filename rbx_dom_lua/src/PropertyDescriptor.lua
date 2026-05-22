@@ -22,6 +22,29 @@ end
 function PropertyDescriptor.fromRaw(data, className, propertyName)
 	local key, value = next(data.DataType)
 
+	-- Capabilities field (added by Starfruit-Studios/rbx-dom fork, per
+	-- standing patches on `starfruit-patches-2026-05` branch). Surfaces
+	-- per-property Roblox SecurityCapability requirements derived from
+	-- creator-docs YAML or empirical capability-gate observations.
+	--
+	-- Wire shape: `data.Capabilities` is either:
+	--   - `nil` (no capability data known — treat as unrestricted)
+	--   - an array of capability-name strings (the property requires
+	--     ALL listed capabilities)
+	--
+	-- The JSON DB serializes capabilities as a sorted array for
+	-- determinism (per ordered_set serializer in rbx_reflection). The
+	-- Lua side uses a SET (table with capability-name keys, true values)
+	-- internally for O(1) `availableCapabilities[cap]` lookups in the
+	-- consumer's check loop.
+	local capabilities = nil
+	if data.Capabilities ~= nil then
+		capabilities = {}
+		for _, capName in ipairs(data.Capabilities) do
+			capabilities[capName] = true
+		end
+	end
+
 	return setmetatable({
 		-- The meanings of the key and value in DataType differ when the type of
 		-- the property is Enum. When the property is of type Enum, the key is
@@ -38,7 +61,27 @@ function PropertyDescriptor.fromRaw(data, className, propertyName)
 		scriptability = data.Scriptability,
 		className = className,
 		name = propertyName,
+		capabilities = capabilities,
 	}, PropertyDescriptor)
+end
+
+-- Returns true if any of this property's required capabilities are NOT
+-- present in the `availableCapabilities` set (a table with capability
+-- name keys and true values). Used by consumers to auto-skip writes
+-- the plugin's runtime context can't satisfy — e.g. plugin context
+-- lacks `RobloxScript`, `RobloxEngine`, `RobloxCloud`, `InternalTest`.
+-- Returns false if `self.capabilities` is nil (no data — treat as
+-- unrestricted) OR if every required capability is present.
+function PropertyDescriptor:requiresUnavailableCapability(availableCapabilities)
+	if self.capabilities == nil then
+		return false
+	end
+	for capName in pairs(self.capabilities) do
+		if not availableCapabilities[capName] then
+			return true
+		end
+	end
+	return false
 end
 
 function PropertyDescriptor:read(instance)
