@@ -1,4 +1,9 @@
-use std::{collections::HashMap, fs, path::Path};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    fs,
+    path::Path,
+};
 
 use anyhow::{anyhow, bail, Context};
 use rbx_reflection::{
@@ -61,6 +66,17 @@ impl Patches {
                 );
                 property.kind = property_add.kind();
                 property.scriptability = property_add.scriptability;
+                if let Some(capabilities) = &property_add.capabilities {
+                    // Convert String -> Cow<str> for the database's lifetime
+                    // model. `add` patches construct a brand-new descriptor,
+                    // so all owned data is safe.
+                    property.capabilities = Some(
+                        capabilities
+                            .iter()
+                            .map(|c| Cow::Owned(c.clone()))
+                            .collect(),
+                    );
+                }
 
                 class.properties.insert(property_name.as_str(), property);
             }
@@ -122,6 +138,24 @@ impl Patches {
                     };
 
                     existing_property.scriptability = *scriptability;
+                }
+
+                // Capabilities patch — overlay onto existing property
+                // (typically used to attach SecurityCapability requirements
+                // surfaced by creator-docs YAML scraping or by empirical
+                // validation). Existing capabilities (if any) are merged
+                // with the patch — additive, never destructive — because
+                // multiple patch files may overlay different capability
+                // sources onto the same property.
+                if let Some(capabilities) = &property_change.capabilities {
+                    let mut merged = existing_property
+                        .capabilities
+                        .clone()
+                        .unwrap_or_default();
+                    for c in capabilities {
+                        merged.insert(Cow::Owned(c.clone()));
+                    }
+                    existing_property.capabilities = Some(merged);
                 }
             }
         }
@@ -248,6 +282,15 @@ struct PropertyChange {
     serialization: Option<Serialization>,
     scriptability: Option<Scriptability>,
     default_value: Option<Variant>,
+    /// Optional set of Roblox SecurityCapabilities required by this
+    /// property. Used to overlay capability data onto descriptors
+    /// extracted from api-dump (which currently doesn't expose this).
+    /// Sourced from creator-docs YAML scraping (see
+    /// `tools/derive_capabilities.mjs` in the consumer repo) or from
+    /// empirical capability-gate observations (see Findings #44/#44b).
+    /// Merge semantics: additive — multiple patch files can contribute
+    /// to the same property's set; entries never overwrite.
+    capabilities: Option<HashSet<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -291,6 +334,9 @@ struct PropertyAdd {
     serialization: Option<Serialization>,
     scriptability: Scriptability,
     default_value: Option<Variant>,
+    /// Optional set of Roblox SecurityCapabilities required by this
+    /// property. See `PropertyChange::capabilities` for semantics.
+    capabilities: Option<HashSet<String>>,
 }
 
 impl PropertyAdd {
