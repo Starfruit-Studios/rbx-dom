@@ -163,6 +163,31 @@ pub struct PropertyDescriptor<'a> {
 
     /// The kind of property this is, including whether it is canonical.
     pub kind: PropertyKind<'a>,
+
+    /// The set of Roblox SecurityCapabilities required to read/write this
+    /// property. When `None`, no capability data is known (treat as
+    /// unrestricted). When `Some(set)`, the caller must possess all named
+    /// capabilities to interact with the property; otherwise the engine
+    /// fails the read/write with a "lacking capability X" error.
+    ///
+    /// Populated from per-property `capabilities` entries in `patches.yml`
+    /// (which in turn are derived from Roblox creator-docs YAML by tools
+    /// like `derive_capabilities.mjs`). Properties not covered by a
+    /// patches.yml entry serialize with `None` here and consumers
+    /// fall back to legacy hand-curated skip lists.
+    ///
+    /// Stable across rbx-dom regens — adding new capabilities to a
+    /// property is additive to this set, never reshapes it. Caller code
+    /// should treat unknown capability strings as "may be required" for
+    /// forward compat with Roblox adding new SecurityCapabilities.
+    ///
+    /// Per `Starfruit-Studios/rbx-dom` fork policy: this field is part
+    /// of the fork's standing patches over upstream until either
+    /// (a) upstream rojo-rbx/rbx-dom Issue #460 lands an equivalent
+    /// or (b) Roblox's SecurityCapabilities API leaves beta + we
+    /// stabilize the field shape post-finalization.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<HashSet<Cow<'a, str>>>,
 }
 
 impl<'a> PropertyDescriptor<'a> {
@@ -176,6 +201,7 @@ impl<'a> PropertyDescriptor<'a> {
             kind: PropertyKind::Canonical {
                 serialization: PropertySerialization::Serializes,
             },
+            capabilities: None,
         }
     }
 }
