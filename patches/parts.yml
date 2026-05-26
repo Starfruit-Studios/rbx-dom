@@ -62,3 +62,18 @@ Change:
         Type: Migrate
         To: TextureContent
         Migration: ContentIdToContent
+
+  # CollisionFidelity is empirically serialized by Roblox Studio's Save-As
+  # (verified 2026-05-26 against a production game: all 22 MeshParts of
+  # a fuselage Model preserve `PreciseConvexDecomposition` through Save-As
+  # → load round-trip). The upstream API dump marks it `DoesNotSerialize`,
+  # which causes rbx-dom-based readers to silently drop the property —
+  # leaving freshly-created MeshParts at the engine default `Box`, which
+  # catastrophically breaks raycasts on non-cuboid meshes (ProximityPrompt
+  # line-of-sight, mouse-hover detection, projectile physics, etc).
+  # Property is defined on TriangleMeshPart (MeshPart's superclass),
+  # not MeshPart directly.
+  TriangleMeshPart:
+    CollisionFidelity:
+      Serialization:
+        Type: Serializes
