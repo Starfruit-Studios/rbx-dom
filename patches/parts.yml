@@ -69,3 +69,13 @@ Change:
         Type: Migrate
         To: Content
         Migration: ContentIdToContent
+
+  # Studio still loads CollisionFidelity from a place or model file (the API
+  # dump says CanLoad true) but no longer saves it (CanSave false), so the dump
+  # marks it DoesNotSerialize and rbx-dom readers drop a value a file does hold.
+  # Marking it Serializes keeps that value. It is defined on TriangleMeshPart
+  # (MeshPart's superclass), not on MeshPart.
+  TriangleMeshPart:
+    CollisionFidelity:
+      Serialization:
+        Type: Serializes
