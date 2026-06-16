@@ -3,7 +3,7 @@
     0,
     725,
     0,
-    7251140
+    7251148
   ],
   "Classes": {
     "Accessory": {
@@ -42928,25 +42928,16 @@
         },
         "Attributes": {
           "Attributes": {
-            "RBX_BackupBrightness": {
-              "Float32": 1.0
-            },
-            "RBX_BackupExposureCompensation": {
-              "Float32": 0.0
-            },
-            "RBX_LightingCompatibilityMigrated": {
-              "Bool": true
-            },
             "RBX_LightingTechnologyUnifiedMigration": {
               "Bool": true
             },
             "RBX_OriginalTechnologyOnFileLoad": {
-              "Int32": 2
+              "Int32": 1
             }
           }
         },
         "Brightness": {
-          "Float32": 1.9812492
+          "Float32": 1.0
         },
         "Capabilities": {
           "SecurityCapabilities": 0
@@ -83051,7 +83042,7 @@
           ],
           "Kind": {
             "Canonical": {
-              "Serialization": "DoesNotSerialize"
+              "Serialization": "Serializes"
             }
           }
         },
