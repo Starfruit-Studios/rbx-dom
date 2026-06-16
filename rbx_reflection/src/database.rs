@@ -2,6 +2,7 @@
 // for most cases.
 #![allow(clippy::new_without_default)]
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use rbx_types::{Variant, VariantType};
