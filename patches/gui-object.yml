@@ -1,0 +1,13 @@
+# Since Roblox 0.737, GuiObject.InputSink is runtime-only (the API dump says
+# CanLoad false, CanSave false) and a hidden GuiObject.Sink, of the same
+# InputSink enum, is what Studio saves. Keep InputSink as the canonical
+# property, saved as Sink, so files from before and after the change both read
+# into InputSink. (InputContext.Sink is an unrelated property on another class.)
+Change:
+  GuiObject:
+    InputSink:
+      Serialization:
+        Type: SerializesAs
+        As: Sink
+    Sink:
+      AliasFor: InputSink
