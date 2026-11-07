@@ -3853,6 +3853,12 @@ chunks:
         - 0
   - Prop:
       type_id: 17
+      prop_name: Sink
+      prop_type: Enum
+      values:
+        - 0
+  - Prop:
+      type_id: 17
       prop_name: Interactable
       prop_type: Bool
       values:
@@ -3986,12 +3992,6 @@ chunks:
       prop_type: String
       values:
         - ""
-  - Prop:
-      type_id: 17
-      prop_name: Sink
-      prop_type: Enum
-      values:
-        - 0
   - Prop:
       type_id: 17
       prop_name: Size

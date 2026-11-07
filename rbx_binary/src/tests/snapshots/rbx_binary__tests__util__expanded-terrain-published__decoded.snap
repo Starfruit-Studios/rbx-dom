@@ -1265,6 +1265,8 @@ expression: decoded_viewed
                 - 0
             ImageTransparency:
               Float32: 0
+            InputSink:
+              Enum: 0
             Interactable:
               Bool: true
             LayoutOrder:
@@ -1305,8 +1307,6 @@ expression: decoded_viewed
               Int32: 0
             SerializedOverrides:
               BinaryString: ""
-            Sink:
-              Enum: 0
             Size:
               UDim2:
                 - - 0

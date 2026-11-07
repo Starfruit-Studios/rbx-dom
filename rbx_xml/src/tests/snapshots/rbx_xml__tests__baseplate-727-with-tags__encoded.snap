@@ -1178,6 +1178,7 @@ expression: encoded_text
             <Y>0</Y>
           </Vector2>
           <float name="ImageTransparency">0</float>
+          <token name="Sink">0</token>
           <bool name="Interactable">true</bool>
           <int name="LayoutOrder">0</int>
           <Ref name="NextSelectionDown">null</Ref>
